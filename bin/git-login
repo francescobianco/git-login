@@ -1,0 +1,196 @@
+#!/usr/bin/env bash
+set -e
+
+# @section_code: SC000
+# @section_name: blueprint
+# @blueprint_name: SSP
+# @blueprint_version: 1.0
+# @blueprint_url: https://mush.javanile.org/blueprint/
+
+# @section_code: SC001
+# @section_name: file-meta
+# @package: git-login
+# @file_type: build-entrypoint
+# @build_type: bin
+# @build_with: Mush v0.2.0 (2026-03-21 develop)
+# @build_date: 2026-04-17T20:05:07Z
+
+# @section_code: SC005
+# @section_name: functions
+use() { return 0; }
+extern() { return 0; }
+legacy() { return 0; }
+module() { return 0; }
+public() { return 0; }
+embed() { return 0; }
+inject() { return 0; }
+
+# @section_code: SC007
+# @section_name: source
+# @source_index: 1
+# @source_file: src/main.sh
+# @portion_type: entrypoint
+module provider
+module github
+module gitlab
+
+main() {
+  local remote_url
+  remote_url=$(git remote get-url origin 2>/dev/null)
+
+  if [ -z "$remote_url" ]; then
+    echo "git-login: no remote 'origin' found in current directory" >&2
+    return 1
+  fi
+
+  git_login_provider_credential_helper_setup
+
+  local provider
+  provider=$(git_login_provider_detect "$remote_url")
+
+  case "$provider" in
+    github) git_login_github_login "$remote_url" ;;
+    gitlab) git_login_gitlab_login "$remote_url" ;;
+    *) echo "git-login: unsupported provider for remote '$remote_url'" >&2; return 1 ;;
+  esac
+}
+# @section_code: SC007
+# @section_name: source
+# @source_index: 2
+# @source_file: src/provider.sh
+# @portion_type: module
+## Detect the remote provider and configure the credential helper.
+
+# Detect provider name from a remote URL.
+# Supports HTTPS (https://github.com/...) and SSH (git@github.com:...) forms.
+git_login_provider_detect() {
+  local url
+  url="$1"
+
+  case "$url" in
+    *github.com*) echo "github" ;;
+    *gitlab.com*) echo "gitlab" ;;
+    *bitbucket.org*) echo "bitbucket" ;;
+    *) echo "unknown" ;;
+  esac
+}
+
+# Extract the hostname from a remote URL for use in git-credential entries.
+git_login_provider_host() {
+  local url
+  url="$1"
+
+  # HTTPS form: https://github.com/user/repo.git
+  # SSH form:   git@github.com:user/repo.git
+  case "$url" in
+    https://*)
+      url="${url#https://}"
+      echo "${url%%/*}"
+      ;;
+    git@*)
+      url="${url#git@}"
+      echo "${url%%:*}"
+      ;;
+    *)
+      echo ""
+      ;;
+  esac
+}
+
+# Configure git to use the in-memory credential cache globally so that
+# approved credentials survive across multiple git invocations.
+git_login_provider_credential_helper_setup() {
+  git config --global credential.helper 'cache --timeout=3600'
+}
+# @section_code: SC007
+# @section_name: source
+# @source_index: 3
+# @source_file: src/github.sh
+# @portion_type: module
+## GitHub provider — authenticates via GITHUB_TOKEN and GITHUB_USER.
+
+git_login_github_login() {
+  local url
+  url="$1"
+
+  local host
+  host=$(git_login_provider_host "$url")
+
+  # Fall back to github.com for SSH remotes that resolve to github.com
+  if [ -z "$host" ]; then
+    host="github.com"
+  fi
+
+  local user
+  user="${GITHUB_USER:-}"
+
+  local token
+  token="${GITHUB_TOKEN:-}"
+
+  if [ -z "$user" ]; then
+    printf "GitHub username: "
+    read -r user </dev/tty
+  fi
+
+  if [ -z "$token" ]; then
+    printf "GitHub token: "
+    read -rs token </dev/tty
+    echo
+  fi
+
+  git credential approve <<EOF
+protocol=https
+host=${host}
+username=${user}
+password=${token}
+EOF
+
+  echo "git-login: GitHub credentials cached (${user}@${host}, timeout 3600s)"
+}
+# @section_code: SC007
+# @section_name: source
+# @source_index: 4
+# @source_file: src/gitlab.sh
+# @portion_type: module
+## GitLab provider — authenticates via GITLAB_TOKEN and GITLAB_USER.
+
+git_login_gitlab_login() {
+  local url
+  url="$1"
+
+  local host
+  host=$(git_login_provider_host "$url")
+
+  if [ -z "$host" ]; then
+    host="gitlab.com"
+  fi
+
+  local user
+  user="${GITLAB_USER:-}"
+
+  local token
+  token="${GITLAB_TOKEN:-}"
+
+  if [ -z "$user" ]; then
+    printf "GitLab username: "
+    read -r user </dev/tty
+  fi
+
+  if [ -z "$token" ]; then
+    printf "GitLab token: "
+    read -rs token </dev/tty
+    echo
+  fi
+
+  git credential approve <<EOF
+protocol=https
+host=${host}
+username=${user}
+password=${token}
+EOF
+
+  echo "git-login: GitLab credentials cached (${user}@${host}, timeout 3600s)"
+}
+# @section_code: SC006
+# @section_name: entrypoint
+main "$@"
