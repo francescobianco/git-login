@@ -3,6 +3,11 @@ module github
 module gitlab
 
 main() {
+  if ! git rev-parse --git-dir > /dev/null 2>&1; then
+    echo "fatal: not a git repository (or any of the parent directories): .git" >&2
+    return 128
+  fi
+
   local remote_url
   remote_url=$(git remote get-url origin 2>/dev/null)
 
